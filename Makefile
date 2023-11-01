@@ -2,7 +2,7 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -pedantic -O2
 CORE = src/chip8.cpp src/assembler.cpp
 
-.PHONY: all test roms clean
+.PHONY: all test roms pong breakout clean
 
 all: chip8
 
@@ -18,6 +18,14 @@ test: test_chip8
 roms: chip8
 	./chip8 asm roms/bouncer.asm roms/bouncer.ch8
 	./chip8 asm roms/keypad.asm roms/keypad.ch8
+	./chip8 asm roms/pong.asm roms/pong.ch8
+	./chip8 asm roms/breakout.asm roms/breakout.ch8
+
+pong: chip8
+	./chip8 run roms/pong.asm --hz 500
+
+breakout: chip8
+	./chip8 run roms/breakout.asm --hz 500
 
 clean:
 	rm -f chip8 test_chip8 roms/*.ch8

@@ -1,6 +1,9 @@
 // Tests for the interpreter and the assembler. Build and run with `make test`.
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <functional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -198,12 +201,91 @@ static void test_assembler() {
     }
 }
 
+// ---- the games in roms/ ------------------------------------------------------
+// Assembles a source file from the repository and runs it with the timers
+// ticking every 8 cycles, optionally pressing keys along the way.
+static Machine run_source(const std::string& path, size_t cycles, const std::function<void(Machine&, size_t)>& hook = {}) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("cannot open " + path + " (run the tests from the repository root)");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    Machine m;
+    m.load_rom(chip8::assemble(ss.str()));
+    uint32_t seed = 12345;  // deterministic RND so the runs are repeatable
+    m.set_random([seed]() mutable { seed = seed * 1103515245u + 12345u; return static_cast<uint8_t>(seed >> 16); });
+    size_t i = 0;
+    for (; i < cycles; ++i) {
+        if (hook) hook(m, i);
+        m.cycle();
+        if (i % 8 == 0) m.tick_timers();
+    }
+    // both games process a frame while the delay timer is zero and then wait for
+    // it; keep going until they are waiting again so the display is consistent
+    for (size_t extra = 0; m.delay_timer == 0 && extra < 400; ++extra, ++i) {
+        m.cycle();
+        if (i % 8 == 0) m.tick_timers();
+    }
+    return m;
+}
+
+static int column_pixels(const Machine& m, int x) {
+    int n = 0;
+    for (int y = 0; y < chip8::kHeight; ++y) n += m.pixel(x, y);
+    return n;
+}
+
+static int top_of_column(const Machine& m, int x) {
+    for (int y = 0; y < chip8::kHeight; ++y) if (m.pixel(x, y)) return y;
+    return -1;
+}
+
+static int pixels_in_rows(const Machine& m, int y0, int y1) {
+    int n = 0;
+    for (int y = y0; y <= y1; ++y)
+        for (int x = 0; x < chip8::kWidth; ++x) n += m.pixel(x, y);
+    return n;
+}
+
+static void test_games() {
+    // pong: paddles are 6 pixels tall at columns 2-3 and 60-61, starting at row 13
+    Machine m = run_source("roms/pong.asm", 20000);
+    CHECK("pong draws paddles, ball and scores", lit_pixels(m) > 20);
+    CHECK("pong left paddle is 6 pixels tall", column_pixels(m, 2) == 6 && column_pixels(m, 3) == 6);
+    CHECK("pong right paddle is 6 pixels tall", column_pixels(m, 60) == 6);
+    CHECK("pong paddle does not move without input", top_of_column(m, 60) == 13);
+    Machine up = run_source("roms/pong.asm", 20000, [](Machine& mm, size_t i) { mm.set_key(0xC, i > 1000); });
+    CHECK("pong key C moves the right paddle up", top_of_column(up, 60) < 13);
+    Machine down = run_source("roms/pong.asm", 20000, [](Machine& mm, size_t i) { mm.set_key(0xD, i > 1000); });
+    CHECK("pong key D moves the right paddle down", top_of_column(down, 60) > 13 && top_of_column(down, 60) <= 26);
+    CHECK("pong scores stay below 9", m.v[7] < 9 && m.v[8] < 9);
+
+    // breakout: 32 bricks of 7x2 pixels in rows 6-16 (the ball pixel is subtracted when it is in that band)
+    auto brick_pixels = [](const Machine& mm) {
+        int n = pixels_in_rows(mm, 6, 16);
+        if (mm.v[4] >= 6 && mm.v[4] <= 16 && mm.v[3] < chip8::kWidth && mm.pixel(mm.v[3], mm.v[4])) n -= 1;
+        return n;
+    };
+    Machine b = run_source("roms/breakout.asm", 220);
+    CHECK("breakout draws 32 bricks", brick_pixels(b) == 32 * 14);
+    CHECK("breakout starts with 3 balls", b.v[8] == 3 && b.v[7] == 32);
+    CHECK("breakout paddle at the bottom", pixels_in_rows(b, 30, 30) == 8);
+    Machine b2 = run_source("roms/breakout.asm", 80000);
+    CHECK("breakout ball breaks bricks over time", b2.v[7] < 32 && brick_pixels(b2) < 32 * 14);
+    CHECK("breakout bricks left matches the display", brick_pixels(b2) == b2.v[7] * 14);
+    // the paddle follows key E (6) to the right
+    Machine right = run_source("roms/breakout.asm", 3000, [](Machine& mm, size_t i) { mm.set_key(6, i > 400); });
+    int paddle_left_edge = -1;
+    for (int x = 0; x < chip8::kWidth; ++x) if (right.pixel(x, 30)) { paddle_left_edge = x; break; }
+    CHECK("breakout key E moves the paddle right", paddle_left_edge > 28);
+}
+
 int main() {
     test_arithmetic_and_flow();
     test_memory_timers_random();
     test_display_and_keys();
     test_errors();
     test_assembler();
+    test_games();
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
