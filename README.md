@@ -1,5 +1,7 @@
 # chip8
 
+> 🇺🇸 [English version below](#english)
+
 Um emulador de CHIP-8 em C++17 com display no terminal, disassembler e assembler, então dá pra escrever programa em mnemônicos legíveis e ver rodando. E, porque emulador sem jogo é triste, dois jogos escritos em assembly de CHIP-8: **Pong** pra dois jogadores e **Breakout**.
 
 ```sh
@@ -34,4 +36,38 @@ Testes: `make test` (ASan e UBSan): todo opcode, flags, wrap e colisão de sprit
 
 ---
 
-**EN:** a CHIP-8 emulator in C++17 with a terminal display, an assembler and a disassembler, plus two games written in CHIP-8 assembly (two-player Pong and Breakout) that the test-suite runs headless, pressing keys and checking the display. All 35 opcodes, quirk switches, 60 Hz timers, ASan/UBSan tests. MIT.
+## English
+
+A CHIP-8 emulator in C++17 with a terminal display, a disassembler and an assembler, so you can write programs in readable mnemonics and watch them run. And, because an emulator without games is sad, two games written in CHIP-8 assembly: two-player **Pong** and **Breakout**.
+
+```sh
+make
+make pong                          # 1/Q move the left paddle, 4/R the right one
+make breakout                      # Q/E move the paddle, 3 balls, 32 bricks
+./chip8 run roms/bouncer.asm       # assembles on the fly and runs
+./chip8 run game.ch8 --hz 700 --quirks cosmac
+./chip8 asm roms/pong.asm pong.ch8
+./chip8 dis pong.ch8
+```
+
+The 64x32 display is drawn with half-block characters (two pixels per terminal line). The hex keypad maps to `1234 / qwer / asdf / zxcv`; Esc quits. A status line shows the PC, the current instruction disassembled, the cycles and whether the buzzer is on.
+
+## The games (`roms/`)
+
+Writing Pong in CHIP-8 is an exercise in humility: 16 8-bit registers, no multiplication, no direct comparison (you do a `SUB` and look at the borrow flag), and the only way to know the ball hit something is the `DRW` collision bit. Breakout uses exactly that: draw the ball, if `VF` went on, undo the drawing, figure out whether it was the paddle, the counter or a brick from the coordinate, erase the brick by redrawing it (XOR), flip the direction. Each game is about 150 commented lines, and there's a `pong.asm` to read before `breakout.asm`.
+
+Both run headless in the tests: the machine executes thousands of cycles with the timers ticking, keys are "pressed" by code, and the suite checks that paddles move, that bricks disappear and that the counter on screen matches the register.
+
+## The emulator
+
+- The 35 original opcodes: flow (`JP`, `CALL`, `RET`, skips), arithmetic and logic with the carry/borrow/shift flags in `VF`, memory (`LD I`, `ADD I`, BCD, register dump and load), timers, random, keyboard including the blocking `LD Vx, K`, and `DRW` with XOR, wrap and collision.
+- Built-in 4x5 font at `0x050`.
+- Quirks for the shift and load/store of the original COSMAC VIP and the SUPER-CHIP `JP V0`, because different ROMs assume different behaviours.
+- Timers at 60 Hz decoupled from the CPU clock (adjustable).
+- Assembler with labels, `DB`/`DW`, decimal, hex (`0x`, `#`, `$`) and binary (`%`) literals, with errors pointing at the line.
+
+`Machine::cycle()` fetches the two-byte opcode at `PC`, advances and dispatches on the high nibble. The state is public data for the tests and the debug line to look at. Nothing in the core touches the terminal.
+
+Tests: `make test` (ASan and UBSan): every opcode, flags, sprite wrap and collision, timers, key wait, both quirks, the errors, the assembler round trip on every mnemonic, and the games.
+
+MIT.
